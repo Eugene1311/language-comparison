@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: spring-event-service
+
+  kafka:
+    consumer:
+      group-id: spring-event-service
+      auto-offset-reset: earliest
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring:
+          json:
+            value:
+              default:
+                type: org.example.eventservice.model.Event
+    bootstrap-servers: localhost:19092
+
+  elasticsearch:
+    password: password
+
+app:
+  kafka:
+    topic: events
+
+  elasticsearch:
+    address: localhost:9200
