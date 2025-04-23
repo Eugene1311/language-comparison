@@ -1,0 +1,181 @@
+name: env
+services:
+  postgres:
+    image: postgres:15
+    restart: on-failure
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_MULTIPLE_DATABASES: provider,integration,inventory,security
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres/script:/docker-entrypoint-initdb.d
+      - ./postgres/postgresql.conf:/var/lib/postgresql/data/postgresql.conf
+      - ${POSTGRES_DATA_PATH}:/var/lib/postgresql/data/
+      - ${POSTGRES_PROVIDER_DATA_PATH}:/var/lib/postgresql/data/
+      - ${POSTGRES_INTEGRATION_DATA_PATH}:/var/lib/postgresql/data/
+      - ${POSTGRES_INVENTORY_DATA_PATH}:/var/lib/postgresql/data/
+      - ${POSTGRES_SECURITY_DATA_PATH}:/var/lib/postgresql/data/
+  pgadmin:
+    container_name: pgadmin
+    image: dpage/pgadmin4
+    restart: on-failure
+    environment:
+      PGADMIN_DEFAULT_EMAIL: user@mail.dno
+      PGADMIN_DEFAULT_PASSWORD: password
+    depends_on:
+      - postgres
+    ports:
+      - "5050:80"
+  mongo:
+    image: mongo:4.2
+    restart: on-failure
+    hostname: mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - ${MONGODB_DATA_PATH}:/var/lib/mongodb
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.2.0
+    restart: on-failure
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/cp
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+      ZOOKEEPER_CLIENT_PORT: 2181
+  kafka:
+    image: confluentinc/cp-kafka:7.2.0
+    restart: on-failure
+    ports:
+      - "29092:29092"
+      - "9092:9092"
+    volumes:
+      - kafka_data:/cp
+    environment:
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CFG_PRODUCER_MAX_REQUEST_SIZE: 1195725856
+    depends_on:
+      - zookeeper
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.2.0
+    hostname: schema-registry
+    restart: on-failure
+    depends_on:
+      - zookeeper
+      - kafka
+    ports:
+      - "8086:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8086
+  console:
+    container_name: redpanda-console
+    image: docker.redpanda.com/vectorized/console:latest
+    restart: on-failure
+    ports:
+      - "3000:8080"
+    volumes:
+      - redpanda_data:/console
+    entrypoint: /bin/sh
+    command: -c "echo \"$$CONSOLE_CONFIG_FILE\" > /tmp/config.yml; /app/console"
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers:
+            - kafka:29092
+          schemaRegistry:
+            enabled: true
+            urls: ["http://schema-registry:8086"]
+    depends_on:
+      - zookeeper
+      - kafka
+      - schema-registry
+  rabbitmq:
+    image: rabbitmq:3.10.2-management
+    hostname: rabbitmq
+    restart: on-failure
+    ports:
+      - ${RABBITMQ_PORT}:5672
+      - ${RABBITMQ_MANAGEMENT_PORT}:15672
+    env_file: ./.env
+    environment:
+      RABBITMQ_DEFAULT_VHOST: my_vhost
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+    volumes:
+      - ${RABBITMQ_CONFIG_PATH}:/etc/rabbitmq/rabbitmq.config
+      - ${RABBITMQ_DEFS_PATH}:/etc/rabbitmq/rabbitmq-defs.json
+      - ${RABBITMQ_DATA_PATH}:/var/lib/rabbitmq
+      - ${RABBITMQ_LOG_PATH}:/var/log/rabbitmq
+  redis:
+    image: redis/redis-stack:7.0.6-RC8
+    hostname: redis
+    restart: on-failure
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    environment:
+      REDIS_ARGS: --requirepass password
+  elasticsearch:
+    image: elasticsearch:8.8.0
+    restart: on-failure
+    environment:
+      ELASTIC_PASSWORD: password
+      discovery.type: single-node
+      cluster.name: elasticsearch
+      xpack.security.enabled: false
+      ingest.geoip.downloader.enabled: false
+    volumes:
+      - ./docker-data/elastic/data/:/usr/share/elasticsearch/data
+      - ./docker-data/elastic/log/:/usr/share/elasticsearch/logs
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+
+  kibana:
+    depends_on:
+      - elasticsearch
+    image: kibana:8.8.0
+    volumes:
+      - certs:/usr/share/kibana/config/certs
+      - kibana_data:/usr/share/kibana/data
+      - kibana.yml:/usr/share/kibana/data
+    ports:
+      - ${KIBANA_PORT}:5601
+    environment:
+      - SERVERNAME=kibana
+      - ELASTICSEARCH_HOSTS=https://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_PASSWORD}
+    mem_limit: ${MEM_LIMIT}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s -I http://localhost:5601 | grep -q 'HTTP/1.1 302 Found'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+volumes:
+  zookeeper_data:
+    driver: local
+  kafka_data:
+    driver: local
+  redpanda_data:
+    driver: local
+  kibana_data:
+    driver: local
