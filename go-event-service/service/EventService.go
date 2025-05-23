@@ -3,24 +3,26 @@ package service
 import (
 	"go-event-service/interfaces"
 	"go-event-service/model"
-	"log"
+	"go.uber.org/zap"
 )
 
 type DomainEventService struct {
 	eventRepository interfaces.EventsRepository
+	logger          *zap.Logger
 }
 
-func NewDomainEventService(eventRepository interfaces.EventsRepository) DomainEventService {
+func NewDomainEventService(eventRepository interfaces.EventsRepository, logger *zap.Logger) DomainEventService {
 	return DomainEventService{
 		eventRepository: eventRepository,
+		logger:          logger,
 	}
 }
 
 func (service DomainEventService) Save(event model.Event) (model.Event, error) {
-	log.Printf("Saving event %+v", event)
+	service.logger.Info("Saving event", zap.Any("event", event))
 	_, err := service.eventRepository.Save(event)
 	if err != nil {
-		log.Printf("Error while savind event %v, %s", event, err.Error())
+		service.logger.Error("Error while saving event", zap.Any("event", event), zap.String("error", err.Error()))
 		return model.Event{}, err
 	}
 

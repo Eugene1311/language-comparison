@@ -8,6 +8,7 @@ import (
 	"go-event-service/model"
 	"go-event-service/repository"
 	"go-event-service/service"
+	"go.uber.org/zap"
 	"log"
 	"os"
 	"os/signal"
@@ -26,6 +27,7 @@ func main() {
 
 	logger := log.New(os.Stdout, "kafka reader: ", 3)
 	errorLogger := log.New(os.Stderr, "kafka reader: ", 3)
+
 	kafkaReader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:     config.App.Kafka.Brokers,
 		GroupID:     config.App.Kafka.ConsumerGroup,
@@ -41,8 +43,12 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to create Elasticsearch client:", err)
 	}
-	eventRepository := repository.NewElasticEventRepository(elasticSearchClient, config.App.Elastic.EventsIndex)
-	eventService := service.NewDomainEventService(eventRepository)
+
+	zapLogger := zap.Must(zap.NewProduction())
+	defer zapLogger.Sync()
+	zapLogger.WithOptions()
+	eventRepository := repository.NewElasticEventRepository(elasticSearchClient, config.App.Elastic.EventsIndex, zapLogger)
+	eventService := service.NewDomainEventService(eventRepository, zapLogger)
 
 	eventsConsumer := consumer.NewEventsConsumer(kafkaReader, eventService)
 	go eventsConsumer.Process()
